@@ -75,16 +75,23 @@
   #toast.show{opacity:1;}
 
   /* User location dot */
-  .user-dot{width:22px;height:22px;position:relative;}
+  .user-dot{width:26px;height:26px;position:relative;pointer-events:none;z-index:5;}
   .user-dot .core{
-    position:absolute;inset:4px;border-radius:50%;background:var(--blue);
-    border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,0.1),0 1px 4px rgba(0,122,255,0.6);
+    position:absolute;left:50%;top:50%;width:16px;height:16px;
+    transform:translate(-50%,-50%);border-radius:50%;background:#0a84ff;
+    border:3px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.35),0 0 0 1px rgba(0,122,255,.25);z-index:2;
   }
   .user-dot .pulse{
-    position:absolute;inset:0;border-radius:50%;background:rgba(0,122,255,0.25);
-    animation:pulse 2.2s ease-out infinite;
+    position:absolute;left:50%;top:50%;width:44px;height:44px;
+    transform:translate(-50%,-50%);border-radius:50%;background:rgba(10,132,255,.22);
+    box-shadow:0 0 0 1px rgba(10,132,255,.12);animation:locationPulse 2.4s ease-out infinite;z-index:1;
   }
-  @keyframes pulse{0%{transform:scale(.6);opacity:.8}100%{transform:scale(2.6);opacity:0}}
+  @keyframes locationPulse{
+    0%{transform:translate(-50%,-50%) scale(.55);opacity:.9}
+    70%{opacity:.22}
+    100%{transform:translate(-50%,-50%) scale(1.35);opacity:0}
+  }
+  @media(prefers-reduced-motion:reduce){.user-dot .pulse{animation:none;opacity:.45}}
 
   /* Bottom sheet */
   #sheet{
@@ -473,9 +480,11 @@ function useFallback(msg){
 function placeUserMarker(){
   if(!userLoc) return;
   if(userMarker){ userMarker.setLngLat([userLoc.lng,userLoc.lat]); return; }
-  const el = document.createElement("div");
-  el.className="user-dot";
-  el.innerHTML='<div class="pulse"></div><div class="core"></div>';
+    const el = document.createElement("div");
+    el.className="user-dot";
+    el.setAttribute("role", "img");
+    el.setAttribute("aria-label", "Your current location");
+    el.innerHTML='<div class="pulse"></div><div class="core"></div>';
   userMarker = new mapboxgl.Marker({element:el}).setLngLat([userLoc.lng,userLoc.lat]).addTo(map);
 }
 document.getElementById("recenter").addEventListener("click", ()=>{
