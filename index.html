@@ -466,6 +466,15 @@ document.getElementById("d-close").addEventListener("click", ()=>{
 });
 
 // ---------- geolocation ----------
+function flyToVisibleLocation(center, zoom, duration){
+  const sheet = document.getElementById("sheet");
+  const coveredHeight = sheet ? Math.max(0, window.innerHeight - sheet.getBoundingClientRect().top) : 0;
+  map.flyTo({
+    center, zoom, duration,
+    padding:{top:0,right:0,bottom:Math.min(coveredHeight, window.innerHeight * 0.72),left:0},
+    retainPadding:false
+  });
+}
 function locateUser(initial){
   if(!("geolocation" in navigator)){ useFallback("Location isn’t available on this device."); return; }
   if(locationWatchId !== null) return;
@@ -476,7 +485,7 @@ function locateUser(initial){
       if(Number.isFinite(pos.coords.heading)) setUserHeading(pos.coords.heading);
       if(!locationCentered){
         locationCentered = true;
-        map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:17, duration:900});
+        flyToVisibleLocation([userLoc.lng,userLoc.lat], 17, 900);
       }
       // moveend will trigger the search + perimeter
     },
@@ -493,7 +502,7 @@ function useFallback(msg){
   toast(msg, 4000);
   userLoc = { lng:DEFAULT_CENTER[0], lat:DEFAULT_CENTER[1] };
   placeUserMarker();
-  map.flyTo({center:DEFAULT_CENTER, zoom:16, duration:600});
+  flyToVisibleLocation(DEFAULT_CENTER, 16, 600);
 }
 function placeUserMarker(){
   if(!userLoc) return;
@@ -538,7 +547,7 @@ if(typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEven
 }
 document.getElementById("recenter").addEventListener("click", async ()=>{
   await enableHeading();
-  if(userLoc){ map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:17, duration:600}); }
+  if(userLoc){ flyToVisibleLocation([userLoc.lng,userLoc.lat], 17, 600); }
   else locateUser(false);
 });
 
