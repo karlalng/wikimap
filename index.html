@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="theme-color" content="#f2f2f7" />
+<title>Nearby — Wikipedia Map</title>
+
+<!-- Installable PWA manifest (inlined so this is a single file) -->
+<link rel="manifest" href='data:application/manifest+json,{"name":"Nearby","short_name":"Nearby","display":"standalone","background_color":"%23f2f2f7","theme_color":"%23f2f2f7","start_url":"."}' />
+
+<link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+
+<style>
+  :root{
+    --bg:#f2f2f7;
+    --card:rgba(255,255,255,0.72);
+    --card-solid:#ffffff;
+    --sep:rgba(60,60,67,0.12);
+    --label:#000;
+    --label2:rgba(60,60,67,0.6);
+    --label3:rgba(60,60,67,0.3);
+    --blue:#007aff;
+    --accent:#d6412b; /* wiki-ish red for pins */
+    --safe-top:env(safe-area-inset-top,0px);
+    --safe-bottom:env(safe-area-inset-bottom,0px);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro",Inter,system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#000;
+      --card:rgba(30,30,32,0.76);
+      --card-solid:#1c1c1e;
+      --sep:rgba(84,84,88,0.5);
+      --label:#fff;
+      --label2:rgba(235,235,245,0.6);
+      --label3:rgba(235,235,245,0.3);
+    }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{
+    margin:0;padding:0;height:100%;width:100%;
+    position:fixed;overflow:hidden;overscroll-behavior:none;
+    background:var(--bg);color:var(--label);
+    -webkit-font-smoothing:antialiased;
+  }
+  #map{position:absolute;inset:0;}
+
+  /* Top-right floating controls, Apple Maps style */
+  .controls{
+    position:absolute;top:calc(var(--safe-top) + 12px);right:12px;z-index:5;
+    display:flex;flex-direction:column;gap:10px;
+  }
+  .ctrl-btn{
+    width:44px;height:44px;border-radius:12px;border:none;
+    background:var(--card);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+    box-shadow:0 1px 6px rgba(0,0,0,0.12);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    color:var(--blue);
+  }
+  .ctrl-btn:active{transform:scale(0.94);}
+  .ctrl-btn svg{width:22px;height:22px;}
+
+  /* Toast */
+  #toast{
+    position:absolute;left:50%;top:calc(var(--safe-top) + 14px);transform:translateX(-50%);
+    z-index:20;background:var(--card);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+    padding:10px 16px;border-radius:20px;font-size:14px;color:var(--label);
+    box-shadow:0 2px 10px rgba(0,0,0,0.15);opacity:0;transition:opacity .25s;pointer-events:none;
+    max-width:84%;text-align:center;
+  }
+  #toast.show{opacity:1;}
+
+  /* User location dot */
+  .user-dot{width:22px;height:22px;position:relative;}
+  .user-dot .core{
+    position:absolute;inset:4px;border-radius:50%;background:var(--blue);
+    border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,0.1),0 1px 4px rgba(0,122,255,0.6);
+  }
+  .user-dot .pulse{
+    position:absolute;inset:0;border-radius:50%;background:rgba(0,122,255,0.25);
+    animation:pulse 2.2s ease-out infinite;
+  }
+  @keyframes pulse{0%{transform:scale(.6);opacity:.8}100%{transform:scale(2.6);opacity:0}}
+
+  /* Bottom sheet */
+  #sheet{
+    position:absolute;left:0;right:0;bottom:0;z-index:10;
+    height:88vh;
+    background:var(--card);backdrop-filter:blur(26px) saturate(180%);-webkit-backdrop-filter:blur(26px) saturate(180%);
+    border-top-left-radius:14px;border-top-right-radius:14px;
+    box-shadow:0 -2px 24px rgba(0,0,0,0.16);
+    transform:translateY(0);
+    transition:transform .36s cubic-bezier(.32,.72,0,1);
+    display:flex;flex-direction:column;
+    touch-action:none;
+  }
+  .grabber-wrap{padding:8px 0 4px;cursor:grab;flex:0 0 auto;}
+  .grabber{width:36px;height:5px;border-radius:3px;background:var(--label3);margin:0 auto;}
+  .sheet-head{padding:0 16px 10px;flex:0 0 auto;}
+  .sheet-title{font-size:22px;font-weight:700;letter-spacing:-0.4px;margin:0 0 10px;}
+  .search{
+    display:flex;align-items:center;gap:8px;background:var(--card-solid);
+    border-radius:10px;padding:9px 12px;color:var(--label2);
+  }
+  .search input{
+    border:none;background:transparent;outline:none;flex:1;font-size:17px;color:var(--label);
+    font-family:inherit;
+  }
+  .search svg{width:18px;height:18px;flex:0 0 auto;}
+  .list{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:4px 0 calc(var(--safe-bottom) + 24px);}
+  .row{
+    display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;
+    border-bottom:0.5px solid var(--sep);
+  }
+  .row:active{background:rgba(120,120,128,0.12);}
+  .row .thumb{
+    width:52px;height:52px;border-radius:10px;flex:0 0 auto;background:var(--sep);
+    object-fit:cover;display:flex;align-items:center;justify-content:center;color:var(--label3);
+    overflow:hidden;
+  }
+  .row .thumb svg{width:22px;height:22px;}
+  .row .meta{flex:1 1 auto;min-width:0;}
+  .row .r-title{font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .row .r-sub{font-size:13px;color:var(--label2);margin-top:2px;}
+  .row .chev{color:var(--label3);flex:0 0 auto;}
+  .row .chev svg{width:14px;height:14px;}
+  .empty{padding:30px 20px;text-align:center;color:var(--label2);font-size:15px;}
+
+  /* Place detail card */
+  #detail{
+    position:absolute;left:0;right:0;bottom:0;z-index:15;
+    background:var(--card-solid);
+    border-top-left-radius:14px;border-top-right-radius:14px;
+    box-shadow:0 -2px 24px rgba(0,0,0,0.22);
+    transform:translateY(110%);
+    transition:transform .36s cubic-bezier(.32,.72,0,1);
+    padding:14px 16px calc(var(--safe-bottom) + 18px);
+    max-height:80vh;overflow-y:auto;
+  }
+  #detail.open{transform:translateY(0);}
+  .d-head{display:flex;align-items:flex-start;gap:12px;}
+  .d-titles{flex:1 1 auto;min-width:0;}
+  .d-title{font-size:22px;font-weight:700;letter-spacing:-0.4px;margin:0;}
+  .d-sub{font-size:14px;color:var(--label2);margin-top:3px;}
+  .d-close{
+    width:30px;height:30px;border-radius:50%;border:none;flex:0 0 auto;
+    background:var(--sep);color:var(--label2);cursor:pointer;font-size:17px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  #d-img{width:100%;height:170px;object-fit:cover;border-radius:12px;margin:12px 0;background:var(--sep);display:none;}
+  #d-extract{font-size:15px;line-height:1.45;color:var(--label);margin:4px 0 14px;}
+  .d-actions{display:flex;gap:10px;}
+  .btn{
+    flex:1;text-align:center;padding:12px;border-radius:12px;font-size:16px;font-weight:600;
+    text-decoration:none;cursor:pointer;border:none;font-family:inherit;
+  }
+  .btn-primary{background:var(--blue);color:#fff;}
+  .btn-secondary{background:var(--sep);color:var(--blue);}
+  .skeleton{color:var(--label3);}
+  .maplibregl-ctrl-attrib{font-size:10px;}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="controls">
+  <button class="ctrl-btn" id="recenter" title="Center on my location" aria-label="Center on my location">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+    </svg>
+  </button>
+</div>
+
+<div id="toast"></div>
+
+<!-- Bottom sheet -->
+<div id="sheet">
+  <div class="grabber-wrap" id="grabber"><div class="grabber"></div></div>
+  <div class="sheet-head">
+    <h1 class="sheet-title">Nearby</h1>
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+      <input id="filter" type="text" placeholder="Search nearby articles" autocomplete="off" />
+    </div>
+  </div>
+  <div class="list" id="list"><div class="empty">Finding your location…</div></div>
+</div>
+
+<!-- Place detail card -->
+<div id="detail">
+  <div class="d-head">
+    <div class="d-titles">
+      <h2 class="d-title" id="d-title">—</h2>
+      <div class="d-sub" id="d-sub"></div>
+    </div>
+    <button class="d-close" id="d-close" aria-label="Close">✕</button>
+  </div>
+  <img id="d-img" alt="" />
+  <p id="d-extract" class="skeleton">Loading…</p>
+  <div class="d-actions">
+    <a id="d-open" class="btn btn-primary" target="_blank" rel="noopener">Open in Wikipedia</a>
+    <a id="d-dir" class="btn btn-secondary" target="_blank" rel="noopener">Directions</a>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ---------- config ----------
+const WIKI_LANG = "en"; // change to es, fr, de, etc. for another Wikipedia edition
+const API = `https://${WIKI_LANG}.wikipedia.org/w/api.php`;
+const MAX_RADIUS = 10000;   // MediaWiki geosearch hard cap (meters)
+const MIN_RADIUS = 500;
+const GS_LIMIT = 500;       // geosearch hard cap
+const DEFAULT_CENTER = [-73.9857, 40.7484]; // fallback: NYC (Empire State) if location denied
+
+// ---------- state ----------
+let userLoc = null;               // {lng,lat}
+let currentResults = [];          // [{pageid,title,lat,lon,dist(from user)}]
+const detailsCache = new Map();   // pageid -> {thumb, extract}
+const queryCache = new Map();     // key -> results
+let lastQueryKey = null;
+let circleSet = false;
+let userMarker = null;
+
+// ---------- map ----------
+const map = new maplibregl.Map({
+  container: "map",
+  style: {
+    version: 8,
+    glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
+    sources: {
+      carto: {
+        type: "raster",
+        tiles: [
+          "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+          "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+          "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+        ],
+        tileSize: 256,
+        attribution: "© OpenStreetMap contributors © CARTO"
+      }
+    },
+    layers: [{ id: "carto", type: "raster", source: "carto" }]
+  },
+  center: DEFAULT_CENTER,
+  zoom: 13,
+  attributionControl: { compact: true }
+});
+map.dragRotate.disable();
+map.touchZoomRotate.disableRotation();
+
+// ---------- helpers ----------
+function toast(msg, ms = 2600){
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove("show"), ms);
+}
+function haversine(lat1,lng1,lat2,lng2){
+  const R=6371000, toR=Math.PI/180;
+  const dLat=(lat2-lat1)*toR, dLng=(lng2-lng1)*toR;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+function fmtDist(m){
+  if(m<1000) return Math.round(m)+" m";
+  return (m/1000).toFixed(m<10000?1:0)+" km";
+}
+function circlePolygon(lng,lat,radius,points=72){
+  const coords=[], R=6378137, d=radius/R, latR=lat*Math.PI/180, lngR=lng*Math.PI/180;
+  for(let i=0;i<=points;i++){
+    const b=2*Math.PI*i/points;
+    const la=Math.asin(Math.sin(latR)*Math.cos(d)+Math.cos(latR)*Math.sin(d)*Math.cos(b));
+    const lo=lngR+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(latR), Math.cos(d)-Math.sin(latR)*Math.sin(la));
+    coords.push([lo*180/Math.PI, la*180/Math.PI]);
+  }
+  return {type:"Feature",geometry:{type:"Polygon",coordinates:[coords]}};
+}
+function viewportRadius(){
+  const b=map.getBounds(), c=map.getCenter();
+  let r=haversine(c.lat,c.lng,b.getNorth(),c.lng);
+  return Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, Math.round(r)));
+}
+
+// ---------- Wikipedia API ----------
+// NOTE: origin=* performs anonymous CORS. We do NOT set custom headers
+// (e.g. User-Agent) from the browser — that would trigger a CORS preflight
+// the API rejects for this simple GET.
+async function geosearch(lng,lat,radius){
+  const url = `${API}?action=query&list=geosearch&gscoord=${lat}%7C${lng}`+
+              `&gsradius=${radius}&gslimit=${GS_LIMIT}&format=json&origin=*`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error("geosearch "+res.status);
+  const j = await res.json();
+  return (j.query && j.query.geosearch) ? j.query.geosearch : [];
+}
+async function fetchDetails(pageid){
+  if(detailsCache.has(pageid)) return detailsCache.get(pageid);
+  const url = `${API}?action=query&pageids=${pageid}`+
+              `&prop=pageimages%7Cextracts&piprop=thumbnail&pithumbsize=480`+
+              `&exintro=1&explaintext=1&exchars=360&format=json&origin=*`;
+  const res = await fetch(url);
+  const j = await res.json();
+  const p = j.query.pages[pageid] || {};
+  const d = { thumb: p.thumbnail ? p.thumbnail.source : null, extract: p.extract || "" };
+  detailsCache.set(pageid, d);
+  return d;
+}
+
+// ---------- rendering: map source + list ----------
+function toFeatureCollection(items){
+  return {
+    type:"FeatureCollection",
+    features: items.map(a=>({
+      type:"Feature",
+      geometry:{type:"Point",coordinates:[a.lon,a.lat]},
+      properties:{ pageid:a.pageid, title:a.title }
+    }))
+  };
+}
+function setArticles(items){
+  const src = map.getSource("wiki");
+  if(src) src.setData(toFeatureCollection(items));
+}
+
+function wikiIconSVG(){
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h4M4 5l4 11 3.5-9M14 5h6M16 5l3 11 3.5-11"/></svg>`;
+}
+
+function renderList(items){
+  const list = document.getElementById("list");
+  const q = (document.getElementById("filter").value||"").toLowerCase().trim();
+  const shown = q ? items.filter(a=>a.title.toLowerCase().includes(q)) : items;
+  if(!shown.length){
+    list.innerHTML = `<div class="empty">${q? "No matches here." : "No Wikipedia articles found in this area. Try zooming out or panning."}</div>`;
+    return;
+  }
+  list.innerHTML = "";
+  shown.slice(0,120).forEach((a,idx)=>{
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML =
+      `<div class="thumb" data-pid="${a.pageid}">${wikiIconSVG()}</div>
+       <div class="meta">
+         <div class="r-title">${escapeHtml(a.title)}</div>
+         <div class="r-sub">${fmtDist(a.dist)} away</div>
+       </div>
+       <div class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6"/></svg></div>`;
+    row.addEventListener("click", ()=>selectArticle(a));
+    list.appendChild(row);
+    // lazy thumbnail — only prefetch for the first rows to keep panning fast;
+    // the rest still load their image when tapped (detail card).
+    if(idx < 28){
+      fetchDetails(a.pageid).then(d=>{
+        if(d.thumb){
+          const el = row.querySelector(".thumb");
+          if(el){ el.innerHTML=""; const img=new Image(); img.src=d.thumb;
+            img.style.objectFit="cover"; img.style.width="100%";img.style.height="100%"; el.appendChild(img); }
+        }
+      }).catch(()=>{});
+    }
+  });
+}
+function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+
+// ---------- search flow ----------
+async function runSearch(center, radius, anchorCircleAtUser){
+  const key = `${center.lat.toFixed(3)},${center.lng.toFixed(3)},${Math.round(map.getZoom())}`;
+  if(key === lastQueryKey) return;
+  lastQueryKey = key;
+
+  let items;
+  if(queryCache.has(key)){
+    items = queryCache.get(key);
+  } else {
+    try { items = await geosearch(center.lng, center.lat, radius); }
+    catch(e){ toast("Couldn’t reach Wikipedia. Check your connection."); return; }
+    queryCache.set(key, items);
+    if(queryCache.size>60){ queryCache.delete(queryCache.keys().next().value); }
+  }
+
+  // compute distance from the user (not the query center) for a true "near me" feel
+  const ref = userLoc || center;
+  currentResults = items.map(a=>({
+    pageid:a.pageid, title:a.title, lat:a.lat, lon:a.lon,
+    dist: haversine(ref.lat, ref.lng, a.lat, a.lon)
+  })).sort((x,y)=>x.dist-y.dist);
+
+  setArticles(currentResults);
+  renderList(currentResults);
+
+  if(anchorCircleAtUser && userLoc && !circleSet){
+    const poly = circlePolygon(userLoc.lng, userLoc.lat, Math.min(radius, MAX_RADIUS));
+    const cs = map.getSource("perimeter");
+    if(cs){ cs.setData(poly); circleSet = true; }
+  }
+}
+
+// debounced viewport search as the user explores
+let moveTimer=null;
+map.on("moveend", ()=>{
+  clearTimeout(moveTimer);
+  moveTimer = setTimeout(()=>{
+    runSearch(map.getCenter(), viewportRadius(), !circleSet);
+  }, 450);
+});
+
+// ---------- selection / detail ----------
+async function selectArticle(a){
+  map.easeTo({center:[a.lon,a.lat], zoom:Math.max(map.getZoom(),16), duration:500});
+  openDetail(a);
+}
+async function openDetail(a){
+  const d = document.getElementById("detail");
+  document.getElementById("d-title").textContent = a.title;
+  document.getElementById("d-sub").textContent = fmtDist(a.dist) + " away";
+  const open = document.getElementById("d-open");
+  open.href = `https://${WIKI_LANG}.wikipedia.org/?curid=${a.pageid}`;
+  document.getElementById("d-dir").href =
+    `https://maps.apple.com/?daddr=${a.lat},${a.lon}`;
+  const img = document.getElementById("d-img");
+  const ex = document.getElementById("d-extract");
+  img.style.display="none"; ex.textContent="Loading…"; ex.classList.add("skeleton");
+  d.classList.add("open");
+  setSheet("peek");
+  try{
+    const det = await fetchDetails(a.pageid);
+    if(det.thumb){ img.src=det.thumb; img.style.display="block"; }
+    ex.textContent = det.extract || "No summary available.";
+    ex.classList.remove("skeleton");
+  }catch(e){ ex.textContent="Couldn’t load details."; ex.classList.remove("skeleton"); }
+}
+document.getElementById("d-close").addEventListener("click", ()=>{
+  document.getElementById("detail").classList.remove("open");
+  setSheet("half");
+});
+
+// ---------- geolocation ----------
+function locateUser(initial){
+  if(!("geolocation" in navigator)){ useFallback("Location isn’t available on this device."); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos=>{
+      userLoc = { lng:pos.coords.longitude, lat:pos.coords.latitude };
+      placeUserMarker();
+      map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:14, duration:900});
+      // moveend will trigger the search + perimeter
+    },
+    err=>{
+      if(initial) useFallback("Location blocked — showing a sample area. Enable location to see what’s near you.");
+      else toast("Couldn’t get your location.");
+    },
+    { enableHighAccuracy:true, timeout:10000, maximumAge:30000 }
+  );
+}
+function useFallback(msg){
+  toast(msg, 4000);
+  userLoc = { lng:DEFAULT_CENTER[0], lat:DEFAULT_CENTER[1] };
+  placeUserMarker();
+  map.flyTo({center:DEFAULT_CENTER, zoom:14, duration:600});
+}
+function placeUserMarker(){
+  if(!userLoc) return;
+  if(userMarker){ userMarker.setLngLat([userLoc.lng,userLoc.lat]); return; }
+  const el = document.createElement("div");
+  el.className="user-dot";
+  el.innerHTML='<div class="pulse"></div><div class="core"></div>';
+  userMarker = new maplibregl.Marker({element:el}).setLngLat([userLoc.lng,userLoc.lat]).addTo(map);
+}
+document.getElementById("recenter").addEventListener("click", ()=>{
+  if(userLoc){ map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:14, duration:600}); }
+  else locateUser(false);
+});
+
+// ---------- map load: sources + layers ----------
+map.on("load", ()=>{
+  // perimeter circle
+  map.addSource("perimeter", {type:"geojson", data:{type:"FeatureCollection",features:[]}});
+  map.addLayer({id:"perimeter-fill",type:"fill",source:"perimeter",
+    paint:{"fill-color":"#007aff","fill-opacity":0.08}});
+  map.addLayer({id:"perimeter-line",type:"line",source:"perimeter",
+    paint:{"line-color":"#007aff","line-width":1.5,"line-opacity":0.5,"line-dasharray":[2,2]}});
+
+  // articles (clustered)
+  map.addSource("wiki", {
+    type:"geojson", data:{type:"FeatureCollection",features:[]},
+    cluster:true, clusterRadius:48, clusterMaxZoom:15
+  });
+  map.addLayer({id:"clusters",type:"circle",source:"wiki",filter:["has","point_count"],
+    paint:{
+      "circle-color":"#d6412b",
+      "circle-opacity":0.92,
+      "circle-radius":["step",["get","point_count"],16,10,20,50,26],
+      "circle-stroke-width":2,"circle-stroke-color":"#fff"
+    }});
+  map.addLayer({id:"cluster-count",type:"symbol",source:"wiki",filter:["has","point_count"],
+    layout:{"text-field":["get","point_count_abbreviated"],
+      "text-font":["Open Sans Bold","Arial Unicode MS Bold"],"text-size":13},
+    paint:{"text-color":"#fff"}});
+  map.addLayer({id:"points",type:"circle",source:"wiki",filter:["!",["has","point_count"]],
+    paint:{
+      "circle-color":"#d6412b","circle-radius":7,
+      "circle-stroke-width":2.5,"circle-stroke-color":"#fff",
+      "circle-opacity":0.95
+    }});
+
+  // interactions
+  map.on("click","clusters", e=>{
+    const f=map.queryRenderedFeatures(e.point,{layers:["clusters"]});
+    const id=f[0].properties.cluster_id;
+    map.getSource("wiki").getClusterExpansionZoom(id).then(z=>{
+      map.easeTo({center:f[0].geometry.coordinates, zoom:z, duration:450});
+    });
+  });
+  map.on("click","points", e=>{
+    const p=e.features[0].properties;
+    const c=e.features[0].geometry.coordinates;
+    const ref=userLoc||map.getCenter();
+    openDetail({pageid:p.pageid, title:p.title, lat:c[1], lon:c[0],
+      dist:haversine(ref.lat,ref.lng,c[1],c[0])});
+  });
+  ["clusters","points"].forEach(l=>{
+    map.on("mouseenter",l,()=>map.getCanvas().style.cursor="pointer");
+    map.on("mouseleave",l,()=>map.getCanvas().style.cursor="");
+  });
+
+  locateUser(true);
+});
+
+// ---------- filter box ----------
+document.getElementById("filter").addEventListener("input", ()=>renderList(currentResults));
+
+// ---------- bottom sheet drag + snap ----------
+(function sheetDrag(){
+  const sheet=document.getElementById("sheet");
+  const grab=document.getElementById("grabber");
+  const vh=()=>window.innerHeight;
+  const snaps=()=>({ full:0, half:vh()*0.42, peek:vh()*0.88-120 }); // translateY px (0=full open)
+  let current="half", startY=0, startT=0, dragging=false;
+
+  window.setSheet=function(name){
+    current=name;
+    sheet.style.transition="transform .36s cubic-bezier(.32,.72,0,1)";
+    sheet.style.transform=`translateY(${snaps()[name]}px)`;
+  };
+  function onDown(e){
+    dragging=true; sheet.style.transition="none";
+    startY=(e.touches?e.touches[0].clientY:e.clientY);
+    startT=snaps()[current];
+    window.addEventListener("pointermove",onMove,{passive:false});
+    window.addEventListener("pointerup",onUp);
+    window.addEventListener("touchmove",onMove,{passive:false});
+    window.addEventListener("touchend",onUp);
+  }
+  function onMove(e){
+    if(!dragging) return;
+    const y=(e.touches?e.touches[0].clientY:e.clientY);
+    let t=startT+(y-startY);
+    t=Math.max(0, Math.min(vh()*0.88-120, t));
+    sheet.style.transform=`translateY(${t}px)`;
+    if(e.cancelable) e.preventDefault();
+  }
+  function onUp(){
+    if(!dragging) return; dragging=false;
+    const cur=parseFloat(sheet.style.transform.replace(/[^0-9.]/g,""))||0;
+    const s=snaps();
+    const nearest=Object.keys(s).reduce((a,b)=>Math.abs(s[b]-cur)<Math.abs(s[a]-cur)?b:a);
+    setSheet(nearest);
+    window.removeEventListener("pointermove",onMove);
+    window.removeEventListener("pointerup",onUp);
+    window.removeEventListener("touchmove",onMove);
+    window.removeEventListener("touchend",onUp);
+  }
+  grab.addEventListener("pointerdown",onDown);
+  grab.addEventListener("touchstart",onDown,{passive:true});
+  window.addEventListener("resize",()=>setSheet(current));
+  setSheet("half");
+})();
+</script>
+</body>
+</html>
