@@ -501,23 +501,11 @@ map.on("load", ()=>{
   map.addLayer({id:"perimeter-line",type:"line",source:"perimeter",
     paint:{"line-color":"#007aff","line-width":1.5,"line-opacity":0.5,"line-dasharray":[2,2]}});
 
-  // articles (clustered)
+  // articles — always show each place separately
   map.addSource("wiki", {
-    type:"geojson", data:{type:"FeatureCollection",features:[]},
-    cluster:true, clusterRadius:48, clusterMaxZoom:15
+    type:"geojson", data:{type:"FeatureCollection",features:[]}
   });
-  map.addLayer({id:"clusters",type:"circle",source:"wiki",filter:["has","point_count"],
-    paint:{
-      "circle-color":"#d6412b",
-      "circle-opacity":0.92,
-      "circle-radius":["step",["get","point_count"],16,10,20,50,26],
-      "circle-stroke-width":2,"circle-stroke-color":"#fff"
-    }});
-  map.addLayer({id:"cluster-count",type:"symbol",source:"wiki",filter:["has","point_count"],
-    layout:{"text-field":["get","point_count_abbreviated"],
-      "text-font":["Open Sans Bold","Arial Unicode MS Bold"],"text-size":13},
-    paint:{"text-color":"#fff"}});
-  map.addLayer({id:"points",type:"circle",source:"wiki",filter:["!",["has","point_count"]],
+  map.addLayer({id:"points",type:"circle",source:"wiki",
     paint:{
       "circle-color":"#d6412b","circle-radius":7,
       "circle-stroke-width":2.5,"circle-stroke-color":"#fff",
@@ -525,14 +513,6 @@ map.on("load", ()=>{
     }});
 
   // interactions
-  map.on("click","clusters", e=>{
-    const f=map.queryRenderedFeatures(e.point,{layers:["clusters"]});
-    const id=f[0].properties.cluster_id;
-    map.getSource("wiki").getClusterExpansionZoom(id, (err,z)=>{
-      if(err) return;
-      map.easeTo({center:f[0].geometry.coordinates, zoom:z, duration:450});
-    });
-  });
   map.on("click","points", e=>{
     const p=e.features[0].properties;
     const c=e.features[0].geometry.coordinates;
@@ -540,7 +520,7 @@ map.on("load", ()=>{
     openDetail({pageid:p.pageid, title:p.title, lat:c[1], lon:c[0],
       dist:haversine(ref.lat,ref.lng,c[1],c[0])});
   });
-  ["clusters","points"].forEach(l=>{
+  ["points"].forEach(l=>{
     map.on("mouseenter",l,()=>map.getCanvas().style.cursor="pointer");
     map.on("mouseleave",l,()=>map.getCanvas().style.cursor="");
   });
