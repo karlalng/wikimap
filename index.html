@@ -214,7 +214,7 @@
 // Free token from https://account.mapbox.com (free tier: ~50k map loads/month).
 // Paste the PUBLIC token (starts with "pk."). See deploy note about URL-restricting it.
 const MAPBOX_TOKEN = "pk.eyJ1Ijoia2FybGFsZXUiLCJhIjoiY21hNHVvM3BjMDllYzJscTFxaXpvdXR0NiJ9.6xoq451g1SU4gy3lb_Xm7A";
-const MAPBOX_STYLE = "mapbox://styles/mapbox/streets-v12";
+const MAPBOX_TILES = `https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/512/{z}/{x}/{y}@2x?access_token=${MAPBOX_TOKEN}`;
 const WIKI_LANG = "en"; // change to es, fr, de, etc. for another Wikipedia edition
 const API = `https://${WIKI_LANG}.wikipedia.org/w/api.php`;
 const MAX_RADIUS = 10000;   // MediaWiki geosearch hard cap (meters)
@@ -235,7 +235,18 @@ let userMarker = null;
 mapboxgl.accessToken = MAPBOX_TOKEN;
 const map = new mapboxgl.Map({
   container: "map",
-  style: MAPBOX_STYLE,
+  style: {
+    version: 8,
+    sources: {
+      "mapbox-streets": {
+        type: "raster",
+        tiles: [MAPBOX_TILES],
+        tileSize: 512,
+        attribution: "© Mapbox © OpenStreetMap"
+      }
+    },
+    layers: [{id:"mapbox-streets", type:"raster", source:"mapbox-streets"}]
+  },
   center: DEFAULT_CENTER,
   zoom: 16
 });
