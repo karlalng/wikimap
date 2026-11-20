@@ -11,8 +11,8 @@
 <!-- Installable PWA manifest (inlined so this is a single file) -->
 <link rel="manifest" href='data:application/manifest+json,{"name":"Nearby","short_name":"Nearby","display":"standalone","background_color":"%23f2f2f7","theme_color":"%23f2f2f7","start_url":"."}' />
 
-<link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet" />
-<script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/mapbox-gl@3/dist/mapbox-gl.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/mapbox-gl@3/dist/mapbox-gl.js"></script>
 
 <style>
   :root{
@@ -211,6 +211,10 @@
 "use strict";
 
 // ---------- config ----------
+// Free token from https://account.mapbox.com (free tier: ~50k map loads/month).
+// Paste the PUBLIC token (starts with "pk."). See deploy note about URL-restricting it.
+const MAPBOX_TOKEN = "pk.eyJ1Ijoia2FybGFsZXUiLCJhIjoiY21hNHVvM3BjMDllYzJscTFxaXpvdXR0NiJ9.6xoq451g1SU4gy3lb_Xm7A";
+const MAPBOX_STYLE = "mapbox://styles/karlaleu/cmaki4z77001y01qk58cf9py3"; // your custom style
 const WIKI_LANG = "en"; // change to es, fr, de, etc. for another Wikipedia edition
 const API = `https://${WIKI_LANG}.wikipedia.org/w/api.php`;
 const MAX_RADIUS = 10000;   // MediaWiki geosearch hard cap (meters)
@@ -228,28 +232,12 @@ let circleSet = false;
 let userMarker = null;
 
 // ---------- map ----------
-const map = new maplibregl.Map({
+mapboxgl.accessToken = MAPBOX_TOKEN;
+const map = new mapboxgl.Map({
   container: "map",
-  style: {
-    version: 8,
-    glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
-    sources: {
-      carto: {
-        type: "raster",
-        tiles: [
-          "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-          "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-          "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
-        ],
-        tileSize: 256,
-        attribution: "© OpenStreetMap contributors © CARTO"
-      }
-    },
-    layers: [{ id: "carto", type: "raster", source: "carto" }]
-  },
+  style: MAPBOX_STYLE,
   center: DEFAULT_CENTER,
-  zoom: 13,
-  attributionControl: { compact: true }
+  zoom: 13
 });
 map.dragRotate.disable();
 map.touchZoomRotate.disableRotation();
@@ -468,7 +456,7 @@ function placeUserMarker(){
   const el = document.createElement("div");
   el.className="user-dot";
   el.innerHTML='<div class="pulse"></div><div class="core"></div>';
-  userMarker = new maplibregl.Marker({element:el}).setLngLat([userLoc.lng,userLoc.lat]).addTo(map);
+  userMarker = new mapboxgl.Marker({element:el}).setLngLat([userLoc.lng,userLoc.lat]).addTo(map);
 }
 document.getElementById("recenter").addEventListener("click", ()=>{
   if(userLoc){ map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:14, duration:600}); }
@@ -511,7 +499,8 @@ map.on("load", ()=>{
   map.on("click","clusters", e=>{
     const f=map.queryRenderedFeatures(e.point,{layers:["clusters"]});
     const id=f[0].properties.cluster_id;
-    map.getSource("wiki").getClusterExpansionZoom(id).then(z=>{
+    map.getSource("wiki").getClusterExpansionZoom(id, (err,z)=>{
+      if(err) return;
       map.easeTo({center:f[0].geometry.coordinates, zoom:z, duration:450});
     });
   });
