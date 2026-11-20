@@ -505,7 +505,7 @@ map.on("load", ()=>{
   map.addSource("wiki", {
     type:"geojson", data:{type:"FeatureCollection",features:[]}
   });
-  map.addLayer({id:"points",type:"circle",source:"wiki",
+  map.addLayer({id:"points",type:"circle",source:"wiki",minzoom:13,
     paint:{
       "circle-color":"#d6412b","circle-radius":7,
       "circle-stroke-width":2.5,"circle-stroke-color":"#fff",
