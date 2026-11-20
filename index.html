@@ -86,6 +86,14 @@
     transform:translate(-50%,-50%);border-radius:50%;background:rgba(10,132,255,.22);
     box-shadow:0 0 0 1px rgba(10,132,255,.12);animation:locationPulse 2.4s ease-out infinite;z-index:1;
   }
+  .user-dot .heading{
+    position:absolute;left:50%;top:50%;width:0;height:0;
+    border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:15px solid #0a84ff;
+    transform:translate(-50%,-100%) rotate(var(--heading,0deg));transform-origin:50% 100%;
+    filter:drop-shadow(0 -1px 0 #fff) drop-shadow(1px 0 0 #fff) drop-shadow(-1px 0 0 #fff);z-index:1;
+    opacity:0;transition:transform .2s linear,opacity .2s;
+  }
+  .user-dot.has-heading .heading{opacity:1;}
   @keyframes locationPulse{
     0%{transform:translate(-50%,-50%) scale(.55);opacity:.9}
     70%{opacity:.22}
@@ -237,6 +245,9 @@ const queryCache = new Map();     // key -> results
 let lastQueryKey = null;
 let circleSet = false;
 let userMarker = null;
+let locationWatchId = null;
+let locationCentered = false;
+let headingListening = false;
 
 // ---------- map ----------
 mapboxgl.accessToken = MAPBOX_TOKEN;
@@ -457,14 +468,21 @@ document.getElementById("d-close").addEventListener("click", ()=>{
 // ---------- geolocation ----------
 function locateUser(initial){
   if(!("geolocation" in navigator)){ useFallback("Location isn’t available on this device."); return; }
-  navigator.geolocation.getCurrentPosition(
+  if(locationWatchId !== null) return;
+  locationWatchId = navigator.geolocation.watchPosition(
     pos=>{
       userLoc = { lng:pos.coords.longitude, lat:pos.coords.latitude };
       placeUserMarker();
-      map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:17, duration:900});
+      if(Number.isFinite(pos.coords.heading)) setUserHeading(pos.coords.heading);
+      if(!locationCentered){
+        locationCentered = true;
+        map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:17, duration:900});
+      }
       // moveend will trigger the search + perimeter
     },
     err=>{
+      if(locationWatchId !== null) navigator.geolocation.clearWatch(locationWatchId);
+      locationWatchId = null;
       if(initial) useFallback("Location blocked — showing a sample area. Enable location to see what’s near you.");
       else toast("Couldn’t get your location.");
     },
@@ -484,10 +502,42 @@ function placeUserMarker(){
     el.className="user-dot";
     el.setAttribute("role", "img");
     el.setAttribute("aria-label", "Your current location");
-    el.innerHTML='<div class="pulse"></div><div class="core"></div>';
+    el.innerHTML='<div class="pulse"></div><div class="heading"></div><div class="core"></div>';
   userMarker = new mapboxgl.Marker({element:el}).setLngLat([userLoc.lng,userLoc.lat]).addTo(map);
 }
-document.getElementById("recenter").addEventListener("click", ()=>{
+function setUserHeading(degrees){
+  if(!userMarker || !Number.isFinite(degrees)) return;
+  const el = userMarker.getElement();
+  el.style.setProperty("--heading", `${degrees}deg`);
+  el.classList.add("has-heading");
+}
+function handleOrientation(event){
+  let heading = Number.isFinite(event.webkitCompassHeading) ? event.webkitCompassHeading : null;
+  if(heading === null && event.absolute && Number.isFinite(event.alpha)) heading = (360 - event.alpha) % 360;
+  if(heading !== null) setUserHeading(heading);
+}
+function startHeadingListener(){
+  if(headingListening) return;
+  headingListening = true;
+  window.addEventListener("deviceorientationabsolute", handleOrientation, true);
+  window.addEventListener("deviceorientation", handleOrientation, true);
+}
+async function enableHeading(){
+  try{
+    if(typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function"){
+      if(await DeviceOrientationEvent.requestPermission() !== "granted"){
+        toast("Motion access is needed to show which way you’re facing.");
+        return;
+      }
+    }
+    startHeadingListener();
+  }catch(e){ toast("Couldn’t enable the direction compass."); }
+}
+if(typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission !== "function"){
+  startHeadingListener();
+}
+document.getElementById("recenter").addEventListener("click", async ()=>{
+  await enableHeading();
   if(userLoc){ map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:17, duration:600}); }
   else locateUser(false);
 });
