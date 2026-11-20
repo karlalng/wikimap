@@ -214,7 +214,7 @@
 // Free token from https://account.mapbox.com (free tier: ~50k map loads/month).
 // Paste the PUBLIC token (starts with "pk."). See deploy note about URL-restricting it.
 const MAPBOX_TOKEN = "pk.eyJ1Ijoia2FybGFsZXUiLCJhIjoiY21hNHVvM3BjMDllYzJscTFxaXpvdXR0NiJ9.6xoq451g1SU4gy3lb_Xm7A";
-const MAPBOX_STYLE = "mapbox://styles/karlaleu/cmaki4z77001y01qk58cf9py3"; // your custom style
+const MAPBOX_STYLE = "mapbox://styles/mapbox/streets-v12";
 const WIKI_LANG = "en"; // change to es, fr, de, etc. for another Wikipedia edition
 const API = `https://${WIKI_LANG}.wikipedia.org/w/api.php`;
 const MAX_RADIUS = 10000;   // MediaWiki geosearch hard cap (meters)
@@ -237,7 +237,7 @@ const map = new mapboxgl.Map({
   container: "map",
   style: MAPBOX_STYLE,
   center: DEFAULT_CENTER,
-  zoom: 13
+  zoom: 16
 });
 map.dragRotate.disable();
 map.touchZoomRotate.disableRotation();
@@ -434,7 +434,7 @@ function locateUser(initial){
     pos=>{
       userLoc = { lng:pos.coords.longitude, lat:pos.coords.latitude };
       placeUserMarker();
-      map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:14, duration:900});
+      map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:17, duration:900});
       // moveend will trigger the search + perimeter
     },
     err=>{
@@ -448,7 +448,7 @@ function useFallback(msg){
   toast(msg, 4000);
   userLoc = { lng:DEFAULT_CENTER[0], lat:DEFAULT_CENTER[1] };
   placeUserMarker();
-  map.flyTo({center:DEFAULT_CENTER, zoom:14, duration:600});
+  map.flyTo({center:DEFAULT_CENTER, zoom:16, duration:600});
 }
 function placeUserMarker(){
   if(!userLoc) return;
@@ -459,7 +459,7 @@ function placeUserMarker(){
   userMarker = new mapboxgl.Marker({element:el}).setLngLat([userLoc.lng,userLoc.lat]).addTo(map);
 }
 document.getElementById("recenter").addEventListener("click", ()=>{
-  if(userLoc){ map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:14, duration:600}); }
+  if(userLoc){ map.flyTo({center:[userLoc.lng,userLoc.lat], zoom:17, duration:600}); }
   else locateUser(false);
 });
 
