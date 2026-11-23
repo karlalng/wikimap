@@ -532,6 +532,16 @@ document.getElementById("recenter").addEventListener("click", async ()=>{
 
 // ---------- map load: sources + layers ----------
 map.on("load", ()=>{
+  // Keep a visible street map underneath the Mapbox style if its tiles are blocked.
+  map.addSource("basemap-fallback", {
+    type:"raster",
+    tiles:["https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png"],
+    tileSize:512,
+    attribution:"© OpenStreetMap contributors © CARTO"
+  });
+  const firstNonBackgroundLayer = map.getStyle().layers.find(layer=>layer.type!=="background");
+  map.addLayer({id:"basemap-fallback",type:"raster",source:"basemap-fallback"}, firstNonBackgroundLayer?.id);
+
   // perimeter circle
   map.addSource("perimeter", {type:"geojson", data:{type:"FeatureCollection",features:[]}});
   map.addLayer({id:"perimeter-fill",type:"fill",source:"perimeter",
