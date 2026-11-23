@@ -229,7 +229,6 @@
 // Free token from https://account.mapbox.com (free tier: ~50k map loads/month).
 // Paste the PUBLIC token (starts with "pk."). See deploy note about URL-restricting it.
 const MAPBOX_TOKEN = "pk.eyJ1Ijoia2FybGFsZXUiLCJhIjoiY21hNHVvM3BjMDllYzJscTFxaXpvdXR0NiJ9.6xoq451g1SU4gy3lb_Xm7A";
-const MAPBOX_TILES = `https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/512/{z}/{x}/{y}@2x?access_token=${MAPBOX_TOKEN}`;
 const WIKI_LANG = "en"; // change to es, fr, de, etc. for another Wikipedia edition
 const API = `https://${WIKI_LANG}.wikipedia.org/w/api.php`;
 const MAX_RADIUS = 10000;   // MediaWiki geosearch hard cap (meters)
@@ -253,27 +252,7 @@ let headingListening = false;
 mapboxgl.accessToken = MAPBOX_TOKEN;
 const map = new mapboxgl.Map({
   container: "map",
-  style: {
-    version: 8,
-    sources: {
-      "fallback-map": {
-        type: "raster",
-        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-        tileSize: 256,
-        attribution: "© OpenStreetMap contributors"
-      },
-      "mapbox-streets": {
-        type: "raster",
-        tiles: [MAPBOX_TILES],
-        tileSize: 512,
-        attribution: "© Mapbox © OpenStreetMap"
-      }
-    },
-    layers: [
-      {id:"fallback-map", type:"raster", source:"fallback-map"},
-      {id:"mapbox-streets", type:"raster", source:"mapbox-streets"}
-    ]
-  },
+  style: "mapbox://styles/mapbox/streets-v12",
   center: DEFAULT_CENTER,
   zoom: 16
 });
