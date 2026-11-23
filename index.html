@@ -137,6 +137,10 @@
   }
   .search svg{width:18px;height:18px;flex:0 0 auto;}
   .list{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:4px 0 calc(var(--safe-bottom) + 24px);}
+  .search-section{padding:14px 16px 5px;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--label2);}
+  .search-kind{font-size:12px;color:var(--label2);margin-top:3px;text-transform:capitalize;}
+  .search-icon{width:42px;height:42px;border-radius:10px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;background:var(--sep);color:var(--blue);font-size:20px;font-weight:700;}
+  .search-icon.wiki{font-family:Georgia,serif;color:var(--label);}
   .row{
     display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;
     border-bottom:0.5px solid var(--sep);
@@ -215,7 +219,7 @@
     <h1 class="sheet-title">Nearby</h1>
     <div class="search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
-      <input id="filter" type="text" placeholder="Search nearby articles" autocomplete="off" />
+      <input id="filter" type="search" placeholder="Search cities, countries, or articles" autocomplete="off" enterkeyhint="search" />
     </div>
   </div>
   <div class="list" id="list"><div class="empty">Finding your location…</div></div>
@@ -261,6 +265,9 @@ const queryCache = new Map();     // key -> results
 const heritageCache = new Map();  // pageid -> boolean (Wikidata P1435)
 let lastQueryKey = null;
 let searchGeneration = 0;
+let globalSearchGeneration = 0;
+let globalSearchTimer = null;
+let lastGlobalResults = {places:[],articles:[]};
 let circleSet = false;
 let userMarker = null;
 let locationWatchId = null;
@@ -333,6 +340,41 @@ async function geosearch(lng,lat,radius){
   const j = await res.json();
   return (j.query && j.query.geosearch) ? j.query.geosearch : [];
 }
+async function searchPlaces(query){
+  const center = map.getCenter();
+  const url = `https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(query)}`+
+              `&access_token=${MAPBOX_TOKEN}&autocomplete=true&limit=5`+
+              `&types=country,region,place,locality,neighborhood&proximity=${center.lng},${center.lat}`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error("place search "+res.status);
+  const json = await res.json();
+  return (json.features || []).map(feature=>{
+    const p = feature.properties || {};
+    return {
+      id:feature.id,
+      label:p.full_address || [p.name,p.place_formatted].filter(Boolean).join(", ") || "Unnamed place",
+      kind:p.feature_type || "place",
+      center:feature.geometry && feature.geometry.coordinates,
+      bbox:feature.bbox || p.bbox || null
+    };
+  }).filter(place=>Array.isArray(place.center));
+}
+async function searchWikipedia(query){
+  const url = `${API}?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}`+
+              `&gsrnamespace=0&gsrlimit=7&prop=coordinates%7Cpageimages%7Cextracts`+
+              `&coprimary=primary&piprop=thumbnail&pithumbsize=120`+
+              `&exintro=1&explaintext=1&exchars=100&format=json&origin=*`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error("article search "+res.status);
+  const json = await res.json();
+  return Object.values((json.query && json.query.pages) || {}).sort((a,b)=>(a.index||0)-(b.index||0)).map(page=>{
+    const c = page.coordinates && page.coordinates[0];
+    return {
+      pageid:page.pageid,title:page.title,lat:c ? c.lat : null,lon:c ? c.lon : null,
+      thumb:page.thumbnail ? page.thumbnail.source : null,extract:page.extract || ""
+    };
+  });
+}
 async function fetchDetails(pageid){
   if(detailsCache.has(pageid)) return detailsCache.get(pageid);
   const url = `${API}?action=query&pageids=${pageid}`+
@@ -403,12 +445,13 @@ function wikiIconSVG(){
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h4M4 5l4 11 3.5-9M14 5h6M16 5l3 11 3.5-11"/></svg>`;
 }
 
-function renderList(items){
+function renderList(items, force=false){
   const list = document.getElementById("list");
-  const q = (document.getElementById("filter").value||"").toLowerCase().trim();
-  const shown = q ? items.filter(a=>a.title.toLowerCase().includes(q)) : items;
+  const q = (document.getElementById("filter").value||"").trim();
+  if(q.length>=2 && !force) return;
+  const shown = items;
   if(!shown.length){
-    list.innerHTML = `<div class="empty">${q? "No matches here." : "No Wikipedia articles found in this area. Try zooming out or panning."}</div>`;
+    list.innerHTML = `<div class="empty">No Wikipedia articles found in this area. Try zooming out or panning.</div>`;
     return;
   }
   list.innerHTML = "";
@@ -438,6 +481,68 @@ function renderList(items){
   });
 }
 function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function renderGlobalResults(places,articles,query){
+  const list=document.getElementById("list");
+  list.innerHTML="";
+  if(places.length){
+    const heading=document.createElement("div"); heading.className="search-section"; heading.textContent="Places"; list.appendChild(heading);
+    places.forEach(place=>{
+      const row=document.createElement("div"); row.className="row";
+      row.innerHTML=`<div class="search-icon">⌖</div><div class="meta"><div class="r-title">${escapeHtml(place.label)}</div><div class="search-kind">${escapeHtml(place.kind)}</div></div><div class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6"/></svg></div>`;
+      row.addEventListener("click",()=>selectPlaceResult(place)); list.appendChild(row);
+    });
+  }
+  if(articles.length){
+    const heading=document.createElement("div"); heading.className="search-section"; heading.textContent="Wikipedia articles"; list.appendChild(heading);
+    articles.forEach(article=>{
+      const row=document.createElement("div"); row.className="row";
+      const locationText=Number.isFinite(article.lat) ? "View on map" : "No map location";
+      row.innerHTML=`<div class="search-icon wiki">W</div><div class="meta"><div class="r-title">${escapeHtml(article.title)}</div><div class="search-kind">${locationText}</div></div><div class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6"/></svg></div>`;
+      if(Number.isFinite(article.lat)) row.addEventListener("click",()=>selectArticleResult(article));
+      else row.style.opacity=".55";
+      list.appendChild(row);
+    });
+  }
+  if(!places.length && !articles.length) list.innerHTML=`<div class="empty">No places or mapped Wikipedia articles found for “${escapeHtml(query)}”.</div>`;
+}
+async function runGlobalSearch(query){
+  const generation=++globalSearchGeneration;
+  document.getElementById("list").innerHTML='<div class="empty">Searching places and Wikipedia…</div>';
+  const [placeResult,articleResult]=await Promise.allSettled([searchPlaces(query),searchWikipedia(query)]);
+  if(generation!==globalSearchGeneration || document.getElementById("filter").value.trim()!==query) return;
+  const places=placeResult.status==="fulfilled" ? placeResult.value : [];
+  const articles=articleResult.status==="fulfilled" ? articleResult.value : [];
+  lastGlobalResults={places,articles};
+  renderGlobalResults(places,articles,query);
+}
+function clearSelectedArticle(){
+  const source=map.getSource("selected-article");
+  if(source) source.setData({type:"FeatureCollection",features:[]});
+}
+function selectPlaceResult(place){
+  document.getElementById("filter").value="";
+  clearSelectedArticle();
+  setSheet("peek");
+  setTimeout(()=>{
+    if(Array.isArray(place.bbox) && place.bbox.length===4){
+      map.fitBounds([[place.bbox[0],place.bbox[1]],[place.bbox[2],place.bbox[3]]],{padding:{top:70,right:30,bottom:150,left:30},duration:900,maxZoom:14});
+    }else{
+      const zoom=["country","region"].includes(place.kind)?6:["place","locality"].includes(place.kind)?12:15;
+      flyToVisibleLocation(place.center,zoom,900);
+    }
+  },380);
+  toast(place.label,2200);
+}
+function selectArticleResult(article){
+  document.getElementById("filter").value="";
+  const ref=userLoc||map.getCenter();
+  const mapped={pageid:article.pageid,title:article.title,lat:article.lat,lon:article.lon,dist:haversine(ref.lat,ref.lng,article.lat,article.lon)};
+  const source=map.getSource("selected-article");
+  if(source) source.setData({type:"FeatureCollection",features:[{type:"Feature",geometry:{type:"Point",coordinates:[article.lon,article.lat]},properties:{title:article.title}}]});
+  setSheet("peek");
+  setTimeout(()=>flyToVisibleLocation([article.lon,article.lat],17,900),380);
+  openDetail(mapped);
+}
 
 // ---------- search flow ----------
 async function runSearch(center, radius, anchorCircleAtUser){
@@ -619,6 +724,9 @@ map.on("load", ()=>{
       "circle-stroke-width":2.5,"circle-stroke-color":"#fff",
       "circle-opacity":0.95
     }});
+  map.addSource("selected-article",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+  map.addLayer({id:"selected-article",type:"circle",source:"selected-article",
+    paint:{"circle-color":"#ffd60a","circle-radius":11,"circle-stroke-width":4,"circle-stroke-color":"#007aff","circle-opacity":1}});
 
   // interactions
   map.on("click","points", e=>{
@@ -636,8 +744,24 @@ map.on("load", ()=>{
   locateUser(true);
 });
 
-// ---------- filter box ----------
-document.getElementById("filter").addEventListener("input", ()=>renderList(currentResults));
+// ---------- global place + article search ----------
+document.getElementById("filter").addEventListener("input",e=>{
+  clearTimeout(globalSearchTimer);
+  const query=e.target.value.trim();
+  if(query.length<2){
+    ++globalSearchGeneration;
+    renderList(currentResults,true);
+    return;
+  }
+  globalSearchTimer=setTimeout(()=>runGlobalSearch(query),350);
+});
+document.getElementById("filter").addEventListener("keydown",e=>{
+  if(e.key!=="Enter") return;
+  const first=lastGlobalResults.places[0] || lastGlobalResults.articles.find(a=>Number.isFinite(a.lat));
+  if(!first) return;
+  e.preventDefault();
+  if("center" in first) selectPlaceResult(first); else selectArticleResult(first);
+});
 
 // ---------- bottom sheet drag + snap ----------
 (function sheetDrag(){
