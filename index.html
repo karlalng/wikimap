@@ -63,6 +63,16 @@
   }
   .ctrl-btn:active{transform:scale(0.94);}
   .ctrl-btn svg{width:22px;height:22px;}
+  .map-legend{
+    position:absolute;top:calc(var(--safe-top) + 12px);left:12px;z-index:5;
+    display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:12px;
+    background:var(--card);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+    box-shadow:0 1px 6px rgba(0,0,0,.12);font-size:12px;font-weight:600;color:var(--label);
+  }
+  .legend-item{display:flex;align-items:center;gap:5px;white-space:nowrap;}
+  .legend-dot{width:10px;height:10px;border-radius:50%;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.12);}
+  .legend-dot.heritage{background:#7c3aed;}
+  .legend-dot.other{background:#d6412b;}
 
   /* Toast */
   #toast{
@@ -141,6 +151,7 @@
   .row .meta{flex:1 1 auto;min-width:0;}
   .row .r-title{font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .row .r-sub{font-size:13px;color:var(--label2);margin-top:2px;}
+  .heritage-label{color:#7c3aed;font-weight:700;}
   .row .chev{color:var(--label3);flex:0 0 auto;}
   .row .chev svg{width:14px;height:14px;}
   .empty{padding:30px 20px;text-align:center;color:var(--label2);font-size:15px;}
@@ -188,6 +199,11 @@
       <circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
     </svg>
   </button>
+</div>
+
+<div class="map-legend" aria-label="Map marker legend">
+  <span class="legend-item"><span class="legend-dot heritage"></span>Heritage</span>
+  <span class="legend-item"><span class="legend-dot other"></span>Other</span>
 </div>
 
 <div id="toast"></div>
@@ -242,7 +258,9 @@ let userLoc = null;               // {lng,lat}
 let currentResults = [];          // [{pageid,title,lat,lon,dist(from user)}]
 const detailsCache = new Map();   // pageid -> {thumb, extract}
 const queryCache = new Map();     // key -> results
+const heritageCache = new Map();  // pageid -> boolean (Wikidata P1435)
 let lastQueryKey = null;
+let searchGeneration = 0;
 let circleSet = false;
 let userMarker = null;
 let locationWatchId = null;
@@ -327,6 +345,43 @@ async function fetchDetails(pageid){
   detailsCache.set(pageid, d);
   return d;
 }
+async function fetchHeritageBatch(pageids){
+  const pageUrl = `${API}?action=query&pageids=${pageids.join("%7C")}`+
+                  `&prop=pageprops&ppprop=wikibase_item&format=json&origin=*`;
+  const pageRes = await fetch(pageUrl);
+  if(!pageRes.ok) throw new Error("pageprops "+pageRes.status);
+  const pageJson = await pageRes.json();
+  const pages = Object.values((pageJson.query && pageJson.query.pages) || {});
+  const qidToPageids = new Map();
+  pages.forEach(page=>{
+    const qid = page.pageprops && page.pageprops.wikibase_item;
+    if(!qid){ heritageCache.set(page.pageid, false); return; }
+    if(!qidToPageids.has(qid)) qidToPageids.set(qid, []);
+    qidToPageids.get(qid).push(page.pageid);
+  });
+  const qids = [...qidToPageids.keys()];
+  if(!qids.length) return;
+  const dataUrl = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${qids.join("%7C")}`+
+                  `&props=claims&format=json&origin=*`;
+  const dataRes = await fetch(dataUrl);
+  if(!dataRes.ok) throw new Error("wikidata "+dataRes.status);
+  const dataJson = await dataRes.json();
+  qids.forEach(qid=>{
+    const claims = dataJson.entities && dataJson.entities[qid] && dataJson.entities[qid].claims;
+    const isHeritage = Boolean(claims && claims.P1435 && claims.P1435.some(c=>c.rank!=="deprecated"));
+    qidToPageids.get(qid).forEach(pageid=>heritageCache.set(pageid, isHeritage));
+  });
+}
+async function annotateHeritage(items, generation){
+  const unknown = items.filter(a=>!heritageCache.has(a.pageid)).map(a=>a.pageid);
+  for(let i=0;i<unknown.length;i+=50){
+    try{ await fetchHeritageBatch(unknown.slice(i,i+50)); }
+    catch(e){ /* keep ordinary styling if Wikidata is temporarily unavailable */ }
+    items.forEach(a=>{ if(heritageCache.has(a.pageid)) a.heritage=heritageCache.get(a.pageid); });
+    if(generation===searchGeneration) setArticles(items);
+  }
+  if(generation===searchGeneration) renderList(items);
+}
 
 // ---------- rendering: map source + list ----------
 function toFeatureCollection(items){
@@ -335,7 +390,7 @@ function toFeatureCollection(items){
     features: items.map(a=>({
       type:"Feature",
       geometry:{type:"Point",coordinates:[a.lon,a.lat]},
-      properties:{ pageid:a.pageid, title:a.title }
+      properties:{ pageid:a.pageid, title:a.title, heritage:Boolean(a.heritage) }
     }))
   };
 }
@@ -364,7 +419,7 @@ function renderList(items){
       `<div class="thumb" data-pid="${a.pageid}">${wikiIconSVG()}</div>
        <div class="meta">
          <div class="r-title">${escapeHtml(a.title)}</div>
-         <div class="r-sub">${fmtDist(a.dist)} away</div>
+         <div class="r-sub">${a.heritage?'<span class="heritage-label">Heritage</span> · ':''}${fmtDist(a.dist)} away</div>
        </div>
        <div class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6"/></svg></div>`;
     row.addEventListener("click", ()=>selectArticle(a));
@@ -404,11 +459,14 @@ async function runSearch(center, radius, anchorCircleAtUser){
   const ref = userLoc || center;
   currentResults = items.map(a=>({
     pageid:a.pageid, title:a.title, lat:a.lat, lon:a.lon,
-    dist: haversine(ref.lat, ref.lng, a.lat, a.lon)
+    dist: haversine(ref.lat, ref.lng, a.lat, a.lon),
+    heritage: heritageCache.get(a.pageid) || false
   })).sort((x,y)=>x.dist-y.dist);
 
+  const generation = ++searchGeneration;
   setArticles(currentResults);
   renderList(currentResults);
+  annotateHeritage(currentResults, generation);
 
   if(anchorCircleAtUser && userLoc && !circleSet){
     const poly = circlePolygon(userLoc.lng, userLoc.lat, Math.min(radius, MAX_RADIUS));
@@ -557,7 +615,7 @@ map.on("load", ()=>{
   });
   map.addLayer({id:"points",type:"circle",source:"wiki",minzoom:13,
     paint:{
-      "circle-color":"#d6412b","circle-radius":7,
+      "circle-color":["case",["==",["get","heritage"],true],"#7c3aed","#d6412b"],"circle-radius":7,
       "circle-stroke-width":2.5,"circle-stroke-color":"#fff",
       "circle-opacity":0.95
     }});
