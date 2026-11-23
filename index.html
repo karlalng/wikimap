@@ -657,7 +657,7 @@ document.getElementById("d-close").addEventListener("click",closeDetail);
   function onUp(){
     if(!dragging) return;
     dragging=false;
-    if(offset>60 || offset<8) closeDetail();
+    if(offset>60) closeDetail();
     else{
       detail.style.transition="transform .3s cubic-bezier(.32,.72,0,1)";
       detail.style.transform="translateY(0)";
@@ -667,6 +667,7 @@ document.getElementById("d-close").addEventListener("click",closeDetail);
   grab.addEventListener("pointermove",onMove);
   grab.addEventListener("pointerup",onUp);
   grab.addEventListener("pointercancel",onUp);
+  grab.addEventListener("click",closeDetail);
 })();
 
 // ---------- geolocation ----------
