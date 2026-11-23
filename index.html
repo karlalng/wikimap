@@ -566,7 +566,10 @@ async function runSearch(center, radius, anchorCircleAtUser){
     items = queryCache.get(key);
   } else {
     try { items = await geosearch(center.lng, center.lat, radius); }
-    catch(e){ toast("Couldn’t reach Wikipedia. Check your connection."); return; }
+    catch(e){
+      if(!currentResults.length) toast("Couldn’t reach Wikipedia. Check your connection.");
+      return;
+    }
     queryCache.set(key, items);
     if(queryCache.size>60){ queryCache.delete(queryCache.keys().next().value); }
   }
