@@ -141,6 +141,8 @@
   .search-kind{font-size:12px;color:var(--label2);margin-top:3px;text-transform:capitalize;}
   .search-icon{width:42px;height:42px;border-radius:10px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;background:var(--sep);color:var(--blue);font-size:20px;font-weight:700;}
   .search-icon.wiki{font-family:Georgia,serif;color:var(--label);}
+  .search-result-button{width:100%;border:0;background:transparent;color:inherit;text-align:left;font:inherit;}
+  .search-result-button:disabled{opacity:.55;}
   .row{
     display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;
     border-bottom:0.5px solid var(--sep);
@@ -487,7 +489,7 @@ function renderGlobalResults(places,articles,query){
   if(places.length){
     const heading=document.createElement("div"); heading.className="search-section"; heading.textContent="Places"; list.appendChild(heading);
     places.forEach(place=>{
-      const row=document.createElement("div"); row.className="row";
+      const row=document.createElement("button"); row.type="button"; row.className="row search-result-button";
       row.innerHTML=`<div class="search-icon">⌖</div><div class="meta"><div class="r-title">${escapeHtml(place.label)}</div><div class="search-kind">${escapeHtml(place.kind)}</div></div><div class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6"/></svg></div>`;
       row.addEventListener("click",()=>selectPlaceResult(place)); list.appendChild(row);
     });
@@ -495,11 +497,11 @@ function renderGlobalResults(places,articles,query){
   if(articles.length){
     const heading=document.createElement("div"); heading.className="search-section"; heading.textContent="Wikipedia articles"; list.appendChild(heading);
     articles.forEach(article=>{
-      const row=document.createElement("div"); row.className="row";
+      const row=document.createElement("button"); row.type="button"; row.className="row search-result-button";
       const locationText=Number.isFinite(article.lat) ? "View on map" : "No map location";
       row.innerHTML=`<div class="search-icon wiki">W</div><div class="meta"><div class="r-title">${escapeHtml(article.title)}</div><div class="search-kind">${locationText}</div></div><div class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6"/></svg></div>`;
       if(Number.isFinite(article.lat)) row.addEventListener("click",()=>selectArticleResult(article));
-      else row.style.opacity=".55";
+      else row.disabled=true;
       list.appendChild(row);
     });
   }
