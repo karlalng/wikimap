@@ -450,6 +450,24 @@ function toFeatureCollection(items){
 function setArticles(items){
   const src = map.getSource("wiki");
   if(src) src.setData(toFeatureCollection(items));
+  updatePointVisibility();
+}
+function updatePointVisibility(){
+  if(!map.getLayer("points")) return;
+  const zoom=map.getZoom();
+  const count=currentResults.length;
+  let mode="none";
+
+  // Keep the map quiet at regional scale, then reveal separate dots sooner
+  // when an area is sparse. Dense areas still wait for a closer zoom.
+  if(zoom>=8.5){
+    if(count<=25) mode=zoom>=9.5 ? "all" : "none";
+    else if(count<=75) mode=zoom>=11.5 ? "all" : (zoom>=9.5 ? "heritage" : "none");
+    else mode=zoom>=13 ? "all" : (zoom>=11 ? "heritage" : "none");
+  }
+
+  map.setLayoutProperty("points","visibility",mode==="none" ? "none" : "visible");
+  map.setFilter("points",mode==="heritage" ? ["==",["get","heritage"],true] : null);
 }
 
 function wikiIconSVG(){
@@ -558,7 +576,7 @@ function selectArticleResult(article){
 // ---------- search flow ----------
 async function runSearch(center, radius, anchorCircleAtUser){
   const key = `${center.lat.toFixed(3)},${center.lng.toFixed(3)},${Math.round(map.getZoom())}`;
-  if(key === lastQueryKey) return;
+  if(key === lastQueryKey){ updatePointVisibility(); return; }
   lastQueryKey = key;
 
   let items;
@@ -598,6 +616,7 @@ async function runSearch(center, radius, anchorCircleAtUser){
 let moveTimer=null;
 map.on("moveend", ()=>{
   clearTimeout(moveTimer);
+  updatePointVisibility();
   moveTimer = setTimeout(()=>{
     runSearch(map.getCenter(), viewportRadius(), !circleSet);
   }, 450);
@@ -769,12 +788,13 @@ map.on("load", ()=>{
   map.addSource("wiki", {
     type:"geojson", data:{type:"FeatureCollection",features:[]}
   });
-  map.addLayer({id:"points",type:"circle",source:"wiki",minzoom:13,
+  map.addLayer({id:"points",type:"circle",source:"wiki",
     paint:{
       "circle-color":["case",["==",["get","heritage"],true],"#7c3aed","#d6412b"],"circle-radius":7,
       "circle-stroke-width":2.5,"circle-stroke-color":"#fff",
       "circle-opacity":0.95
     }});
+  updatePointVisibility();
   map.addSource("selected-article",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
   map.addLayer({id:"selected-article",type:"circle",source:"selected-article",
     paint:{"circle-color":"#ffd60a","circle-radius":11,"circle-stroke-width":4,"circle-stroke-color":"#007aff","circle-opacity":1}});
